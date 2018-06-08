@@ -148,7 +148,6 @@ var toC = {
 #if MODULE_CACHE != 0 && ENVIRONMENT_IS_WEB
 var DBVERSION, APP_NAME;
 var MODULE_CACHE_PARAMS = '{{{ MODULE_CACHE }}}';
-
 MODULE_CACHE_PARAMS.split(',').forEach(function(item) {
   if(!DBVERSION && /^\d+$/.test(item)) {
     DBVERSION = Number(item);
@@ -201,13 +200,15 @@ function cacheModuleInstance(appName, moduleInstance) {
 
   function storeInDatabase(db, module) {
     var store = db.transaction([storeName], 'readwrite').objectStore(storeName);
-    var request = store.put(module, appName);
-    request.onerror = function(err) { 
-      console.log('Failed to store in wasm cache: ' + err) 
-    };
-    request.onsuccess = function(err) { 
-      console.log('New record stored in wasm cache: ' + appName) 
-    };
+    var request;
+    try {
+      request = store.put(module, appName);
+      request.onsuccess = function(err) { 
+        console.log('New record stored in wasm cache: ' + appName);
+      };
+    } catch(err) {
+      console.warn('Failed to store in wasm cache: ' + err);
+    }
   }
 
   return openDatabase().then(function(db) {
@@ -219,6 +220,7 @@ function cacheModuleInstance(appName, moduleInstance) {
         console.log('Found module in wasm cache: ' + appName);
         return module;
       }, function(err) {
+        console.error(err);
         return false;
       })
     }
