@@ -145,7 +145,7 @@ var toC = {
 };
 
 
-#if MODULE_CACHE != 0 && ENVIRONMENT_IS_WEB
+#if MODULE_CACHE != '' && ENVIRONMENT_IS_WEB
 var DBVERSION, APP_NAME;
 var MODULE_CACHE_PARAMS = '{{{ MODULE_CACHE }}}';
 MODULE_CACHE_PARAMS.split(',').forEach(function(item) {
@@ -169,8 +169,8 @@ function cacheModuleInstance(appName, moduleInstance) {
     return new Promise(function (resolve, reject) {
       var request = indexedDB.open(dbName, DBVERSION);
       request.onerror = reject.bind(null, 'Error opening wasm cache database.');
-      request.onsuccess = function() { 
-        resolve(request.result) 
+      request.onsuccess = function() {
+        resolve(request.result)
       };
       request.onupgradeneeded = function(event) {
         var db = request.result;
@@ -183,7 +183,7 @@ function cacheModuleInstance(appName, moduleInstance) {
       };
     });
   }
-  
+
   function lookupInDatabase(db) {
     return new Promise(function (resolve, reject) {
       var store = db.transaction([storeName]).objectStore(storeName);
@@ -203,7 +203,7 @@ function cacheModuleInstance(appName, moduleInstance) {
     var request;
     try {
       request = store.put(module, appName);
-      request.onsuccess = function(err) { 
+      request.onsuccess = function(err) {
         console.log('New record stored in wasm cache: ' + appName);
       };
     } catch(err) {
@@ -2323,7 +2323,7 @@ function integrateWasmJS() {
         abort(reason);
       });
     }
-#if MODULE_CACHE != 0 && ENVIRONMENT_IS_WEB
+#if MODULE_CACHE != '' && ENVIRONMENT_IS_WEB
     cacheModuleInstance(APP_NAME).then(function(module) {
       if (module) {
         WebAssembly.instantiate(module, info).then(function(instance) {
@@ -2342,9 +2342,9 @@ function integrateWasmJS() {
           WebAssembly.instantiateStreaming(fetch(wasmBinaryFile, { credentials: 'same-origin' }), info)
             .then(function(output) {
               receiveInstantiatedSource(output);
-#if MODULE_CACHE != 0 && ENVIRONMENT_IS_WEB
+#if MODULE_CACHE != '' && ENVIRONMENT_IS_WEB
               cacheModuleInstance(APP_NAME, output['module']);
-#endif           
+#endif
             })
             .catch(function(reason) {
               // We expect the most common failure cause to be a bad MIME type for the binary,
@@ -2356,7 +2356,7 @@ function integrateWasmJS() {
         } else {
           instantiateArrayBuffer(receiveInstantiatedSource);
         }
-#if MODULE_CACHE != 0 && ENVIRONMENT_IS_WEB
+#if MODULE_CACHE != '' && ENVIRONMENT_IS_WEB
       }
     });
 #endif
