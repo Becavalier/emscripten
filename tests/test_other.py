@@ -6147,12 +6147,13 @@ hello3 ()
 ''')
     open('hello4.c', 'w').write(r'''
 #include <stdio.h>
+#include <math.h>
 
-void
-hello4 ()
+double
+hello4 (double x)
 {
   printf ("Hello4\n");
-  return;
+  return fmod(x, 2.0);
 }
 
 ''')
@@ -6172,6 +6173,7 @@ main()
 {
   void *h;
   void (*f) ();
+  double (*f2) (double);
 
   h = dlopen ("libhello1.wasm", RTLD_NOW);
   f = dlsym (h, "hello1");
@@ -6186,9 +6188,13 @@ main()
   f();
   dlclose (h);
   h = dlopen ("/usr/local/lib/libhello4.wasm", RTLD_NOW);
-  f = dlsym (h, "hello4");
-  f();
+  f2 = dlsym (h, "hello4");
+  double result = f2(5.5);
   dlclose (h);
+
+  if (result == 1.5) {
+    printf("Ok\n");
+  }
   return 0;
 }
 
@@ -6209,6 +6215,7 @@ main()
     self.assertContained('Hello2', out)
     self.assertContained('Hello3', out)
     self.assertContained('Hello4', out)
+    self.assertContained('Ok', out)
 
   def test_dlopen_rtld_global(self):
     # TODO: wasm support. this test checks RTLD_GLOBAL where a module is loaded
@@ -8389,3 +8396,19 @@ var ASM_CONSTS = [function() { var x = !<->5.; }];
                                         ^
 ''', output.stderr)
 
+  def test_wasm_sourcemap(self):
+    # The no_main.c will be read (from relative location) due to speficied "-s"
+    shutil.copyfile(path_from_root('tests', 'other', 'wasm_sourcemap', 'no_main.c'), 'no_main.c')
+    wasm_map_cmd = [PYTHON, path_from_root('tools', 'wasm-sourcemap.py'),
+                    '--sources', '--prefix', '=wasm-src:///',
+                    '--llvm-dwarfdump', path_from_root('tests', 'other', 'wasm_sourcemap', 'foo.wasm.dump'),
+                    '-o', 'a.out.wasm.map',
+                    path_from_root('tests', 'other', 'wasm_sourcemap', 'foo.wasm')]
+    subprocess.check_call(wasm_map_cmd)
+    output = open('a.out.wasm.map').read()
+    # has "sources" entry with file (includes also `--prefix =wasm-src:///` replacement)
+    self.assertContained('wasm-src:///no_main.c', output)
+    # has "sourcesContent" entry with source code (included with `-s` option)
+    self.assertContained('int foo()', output)
+    # has some entries
+    self.assertIsNotNone(re.search(r'"mappings": "[A-Za-z0-9+/]', output))

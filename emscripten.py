@@ -20,14 +20,7 @@ from collections import OrderedDict
 from tools import shared
 from tools import jsrun, cache as cache_module, tempfiles
 from tools.response_file import substitute_response_files
-from tools.shared import WINDOWS, asstr
-
-__rootpath__ = os.path.abspath(os.path.dirname(__file__))
-def path_from_root(*pathelems):
-  """Returns the absolute path for which the given path elements are
-  relative to the emscripten root.
-  """
-  return os.path.join(__rootpath__, *pathelems)
+from tools.shared import WINDOWS, asstr, path_from_root
 
 def get_configuration():
   if hasattr(get_configuration, 'configuration'):
@@ -1907,8 +1900,11 @@ def build_wasm_lld(temp_files, infile, outfile, settings, DEBUG):
     #if settings['DEBUG_LEVEL'] < 2 and not settings['PROFILING_FUNCS']:
     #  cmd.append('--strip-debug')
 
-    for export in shared.expand_response(settings['EXPORTED_FUNCTIONS']):
-      cmd += ['--export', export[1:]] # Strip the leading underscore
+    if settings['EXPORT_ALL']:
+      cmd += ['--no-gc-sections', '--export-all']
+    else:
+      for export in shared.expand_response(settings['EXPORTED_FUNCTIONS']):
+        cmd += ['--export', export[1:]] # Strip the leading underscore
     shared.check_call(cmd)
 
     if DEBUG:
