@@ -7335,7 +7335,7 @@ int main() {
     # with the wrong env we have very odd failures
     check_execute([PYTHON, EMCC, 'main.cpp', '-s', 'SINGLE_FILE=1'])
     src = open('a.out.js').read()
-    envs = ['WEB', 'WORKER', 'NODE', 'SHELL']
+    envs = ['web', 'worker', 'node', 'shell']
     for env in envs:
       for engine in JS_ENGINES:
         if engine == V8_ENGINE: continue # ban v8, weird failures
@@ -7349,20 +7349,8 @@ int main() {
         print('    ' + curr)
         open('test.js', 'w').write(curr + src)
         fail = False
-        try:
-          seen = run_js('test.js', engine=engine, stderr=PIPE)
-        except:
-          fail = True
-        if fail:
-          print('-- acceptable fail')
-          assert actual != env, 'ok to fail if in the wrong environment'
-        else:
-          for other in envs:
-            if env == other:
-              assert ('environment is %s? true' % other) in seen, seen
-            else:
-              assert ('environment is %s? false' % other) in seen, seen
-          print('-- verified proper env is shown')
+        seen = run_js('test.js', engine=engine, stderr=PIPE, full_output=True, assert_returncode=None)
+        self.assertContained('Module.ENVIRONMENT has been deprecated. To force the environment, use the ENVIRONMENT compile-time option (for example, -s ENVIRONMENT=web or -s ENVIRONMENT=node', seen)
 
   def test_warn_no_filesystem(self):
     WARNING = 'Filesystem support (FS) was not included. The problem is that you are using files from JS, but files were not used from C/C++, so filesystem support was not auto-included. You can force-include filesystem support with  -s FORCE_FILESYSTEM=1'
@@ -7801,22 +7789,33 @@ int main() {
           else:
             assert parts[6] == str(expect_max)
 
-  def test_binaryen_invalid_mem(self):
-      ret = subprocess.check_call([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=33MB'])
+  def test_invalid_mem(self):
+    # A large amount is fine, multiple of 16MB or not
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=33MB'])
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=32MB'])
 
-      ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=32MB+1'], stderr=subprocess.PIPE, check=False).stderr
-      assert 'TOTAL_MEMORY must be a multiple of 64KB' in ret, ret
+    # But not in asm.js
+    ret = run_process([PYTHON, EMCC, '-s', 'WASM=0', path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=33MB'], stderr=subprocess.PIPE, check=False).stderr
+    assert 'TOTAL_MEMORY must be a multiple of 16MB' in ret, ret
 
-      ret = subprocess.check_call([PYTHON, EMCC, '-s', 'WASM=0', path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=32MB'])
+    # A tiny amount is fine in wasm
+    run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=65536', '-s', 'TOTAL_STACK=1024'])
+    # And the program works!
+    self.assertContained('hello, world!', run_js('a.out.js'))
 
-      ret = run_process([PYTHON, EMCC, '-s', 'WASM=0', path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=33MB'], stderr=subprocess.PIPE, check=False).stderr
-      assert 'TOTAL_MEMORY must be a multiple of 16MB' in ret, ret
+    # But not in asm.js
+    ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=65536', '-s', 'WASM=0'], stderr=subprocess.PIPE, check=False).stderr
+    assert 'TOTAL_MEMORY must be at least 16MB' in ret, ret
 
-      ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM_MEM_MAX=33MB'], stderr=subprocess.PIPE, check=False).stderr
-      assert 'WASM_MEM_MAX must be a multiple of 64KB' not in ret, ret
+    # Must be a multiple of 64KB
+    ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'TOTAL_MEMORY=32MB+1'], stderr=subprocess.PIPE, check=False).stderr
+    assert 'TOTAL_MEMORY must be a multiple of 64KB' in ret, ret
 
-      ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM_MEM_MAX=33MB+1'], stderr=subprocess.PIPE, check=False).stderr
-      assert 'WASM_MEM_MAX must be a multiple of 64KB' in ret, ret
+    ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM_MEM_MAX=33MB'], stderr=subprocess.PIPE, check=False).stderr
+    assert 'WASM_MEM_MAX must be a multiple of 64KB' not in ret, ret
+
+    ret = run_process([PYTHON, EMCC, path_from_root('tests', 'hello_world.c'), '-s', 'WASM_MEM_MAX=33MB+1'], stderr=subprocess.PIPE, check=False).stderr
+    assert 'WASM_MEM_MAX must be a multiple of 64KB' in ret, ret
 
   def test_binaryen_ctors(self):
     if SPIDERMONKEY_ENGINE not in JS_ENGINES: return self.skip('cannot run without spidermonkey')
@@ -8378,7 +8377,7 @@ end
       except OSError:
         # Ignore missing python aliases.
         pass
-        
+
   def test_ioctl_window_size(self):
       self.do_other_test(os.path.join('other', 'ioctl', 'window_size'))
 
@@ -8406,14 +8405,15 @@ var ASM_CONSTS = [function() { var x = !<->5.; }];
     shutil.copyfile(path_from_root('tests', 'other', 'wasm_sourcemap', 'no_main.c'), 'no_main.c')
     wasm_map_cmd = [PYTHON, path_from_root('tools', 'wasm-sourcemap.py'),
                     '--sources', '--prefix', '=wasm-src:///',
-                    '--llvm-dwarfdump', path_from_root('tests', 'other', 'wasm_sourcemap', 'foo.wasm.dump'),
+                    '--dwarfdump-output',
+                    path_from_root('tests', 'other', 'wasm_sourcemap', 'foo.wasm.dump'),
                     '-o', 'a.out.wasm.map',
                     path_from_root('tests', 'other', 'wasm_sourcemap', 'foo.wasm')]
     subprocess.check_call(wasm_map_cmd)
     output = open('a.out.wasm.map').read()
     # has "sources" entry with file (includes also `--prefix =wasm-src:///` replacement)
-    self.assertContained('wasm-src:///no_main.c', output)
+    self.assertIn('wasm-src:///no_main.c', output)
     # has "sourcesContent" entry with source code (included with `-s` option)
-    self.assertContained('int foo()', output)
+    self.assertIn('int foo()', output)
     # has some entries
-    self.assertIsNotNone(re.search(r'"mappings": "[A-Za-z0-9+/]', output))
+    self.assertRegexpMatches(output, r'"mappings":\s*"[A-Za-z0-9+/]')

@@ -90,6 +90,15 @@ class T(RunnerCore): # Short name, to make it more fun to use manually on the co
   def is_windows(self):
     return WINDOWS
 
+  # whether the test mode supports duplicate function elimination in js
+  def supports_js_dfe(self):
+    if self.is_wasm(): return False # wasm does this when optimizing anyhow
+    supported_opt_levels = ['-O2', '-O3', '-Oz', '-Os']
+    for opt_level in supported_opt_levels:
+      if opt_level in self.emcc_args:
+        return True
+    return False
+
   # Use closure in some tests for some additional coverage
   def maybe_closure(self):
     if '-O2' in self.emcc_args or '-Os' in self.emcc_args:
@@ -5851,19 +5860,13 @@ def process(filename):
 
     test()
 
-    if not self.is_wasm(): # wasm does this all the time
-      # Run with duplicate function elimination turned on
-      dfe_supported_opt_levels = ['-O2', '-O3', '-Oz', '-Os']
-
-      for opt_level in dfe_supported_opt_levels:
-        if opt_level in self.emcc_args:
-          print("Testing poppler with ELIMINATE_DUPLICATE_FUNCTIONS set to 1", file=sys.stderr)
-          num_original_funcs = self.count_funcs('src.cpp.o.js')
-          Settings.ELIMINATE_DUPLICATE_FUNCTIONS = 1
-          test()
-          # Make sure that DFE ends up eliminating more than 200 functions (if we can view source)
-          assert (num_original_funcs - self.count_funcs('src.cpp.o.js')) > 200
-          break
+    if self.supports_js_dfe():
+      print("Testing poppler with ELIMINATE_DUPLICATE_FUNCTIONS set to 1", file=sys.stderr)
+      num_original_funcs = self.count_funcs('src.cpp.o.js')
+      Settings.ELIMINATE_DUPLICATE_FUNCTIONS = 1
+      test()
+      # Make sure that DFE ends up eliminating more than 200 functions (if we can view source)
+      assert (num_original_funcs - self.count_funcs('src.cpp.o.js')) > 200
 
   @sync
   def test_openjpeg(self):
@@ -6827,6 +6830,16 @@ someweirdtext
     Building.COMPILER_TEST_OPTS += ['--bind']
     self.do_run_in_out_file_test('tests', 'core', 'test_embind_5')
 
+  def test_embind_float_constants(self):
+    self.emcc_args += ['--bind']
+    self.do_run_from_file(path_from_root('tests', 'embind', 'test_float_constants.cpp'),
+                          path_from_root('tests', 'embind', 'test_float_constants.out'))
+
+  def test_embind_negative_constants(self):
+    self.emcc_args += ['--bind']
+    self.do_run_from_file(path_from_root('tests', 'embind', 'test_negative_constants.cpp'),
+                          path_from_root('tests', 'embind', 'test_negative_constants.out'))
+
   def test_embind_unsigned(self):
     self.emcc_args += ['--bind', '--std=c++11']
     self.do_run_from_file(path_from_root('tests', 'embind', 'test_unsigned.cpp'), path_from_root('tests', 'embind', 'test_unsigned.out'))
@@ -7038,14 +7051,13 @@ Module.printErr = Module['printErr'] = function(){};
         # the file attribute is optional, but if it is present it needs to refer
         # the output file.
         self.assertPathsIdentical(map_referent, data['file'])
-      if not self.is_wasm_backend():
+      if not self.is_wasm_backend() or Settings.EXPERIMENTAL_USE_LLD:
         assert len(data['sources']) == 1, data['sources']
         self.assertPathsIdentical(src_filename, data['sources'][0])
       else:
-        # Wasm backend currently adds every file linked as part of compiler-rt
+        # s2wasm currently adds every file linked as part of compiler-rt
         # to the 'sources' field.
-        # TODO(jgravelle): when LLD is the wasm-backend default, make sure it
-        # emits only the files we have lines for.
+        # TODO(sbc): Remove this once s2wasm goes away
         assert len(data['sources']) > 1, data['sources']
         normalized_srcs = [src.replace('\\', '/') for src in data['sources']]
         normalized_filename = src_filename.replace('\\', '/')
@@ -7503,6 +7515,12 @@ extern "C" {
   def test_coroutine_asyncify(self):
     self.do_test_coroutine({'ASYNCIFY': 1})
 
+  @no_wasm_backend('ASYNCIFY is not supported in the LLVM wasm backend')
+  def test_asyncify_unused(self):
+    # test a program not using asyncify, but the pref is set
+    Settings.ASYNCIFY = 1
+    self.do_run_in_out_file_test('tests', 'core', 'test_hello_world')
+
   @no_wasm_backend('EMTERPRETIFY causes JSOptimizer to run, which is '
                    'unsupported with Wasm backend')
   def test_coroutine_emterpretify_async(self):
@@ -7641,6 +7659,7 @@ extern "C" {
     self.do_run(open(path_from_root('tests', 'wrap_malloc.cpp')).read(), 'OK.')
 
   def test_environment(self):
+    Settings.ASSERTIONS = 1
     for engine in JS_ENGINES:
       for work in (1, 0):
         # set us to test in just this engine
@@ -7660,6 +7679,13 @@ extern "C" {
             raise
         js = open('src.cpp.o.js').read()
         assert ('require(' in js) == (Settings.ENVIRONMENT == 'node'), 'we should have require() calls only if node js specified'
+
+  def test_dfe(self):
+    if not self.supports_js_dfe(): return self.skip('dfe-only')
+    Settings.ELIMINATE_DUPLICATE_FUNCTIONS = 1
+    self.do_run_in_out_file_test('tests', 'core', 'test_hello_world')
+    self.emcc_args += ['-g2'] # test for issue #6331
+    self.do_run_in_out_file_test('tests', 'core', 'test_hello_world')
 
 # Generate tests for everything
 def make_run(fullname, name=-1, compiler=-1, embetter=0, quantum_size=0,
